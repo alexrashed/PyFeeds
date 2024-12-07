@@ -28,7 +28,7 @@ class TvthekOrfAtSpider(FeedsSpider):
         today = datetime.now(gettz("Europe/Vienna"))
         for day in [today, today - timedelta(days=1)]:
             yield Request(
-                "https://api-tvthek.orf.at/api/v4.3/schedule/{}?limit=1000".format(
+                "https://api-tvthek.orf.at/api/v4.3/schedule/{}".format(
                     day.strftime("%Y-%m-%d")
                 ),
                 meta={"dont_cache": True},
@@ -36,11 +36,6 @@ class TvthekOrfAtSpider(FeedsSpider):
 
     def parse(self, response):
         json_response = json.loads(response.text)
-
-        if "next" in json_response["_links"]:
-            yield Request(
-                json_response["_links"]["nextPage"], meta={"dont_cache": True}
-            )
 
         for item in json_response["_embedded"]["items"]:
             # Skip incomplete items or items with active youth protection.
