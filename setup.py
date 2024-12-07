@@ -24,7 +24,7 @@ setup(
         "python-dateutil",
         "pyxdg",
         "readability-lxml",
-        "scrapy",
+        "scrapy<2.12",
         "scrapy-inline-requests",
     ],
     extras_require={
