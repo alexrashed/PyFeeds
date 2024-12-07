@@ -28,7 +28,7 @@ class TvthekOrfAtSpider(FeedsSpider):
         today = datetime.now(gettz("Europe/Vienna"))
         for day in [today, today - timedelta(days=1)]:
             yield Request(
-                "https://api-tvthek.orf.at/api/v3/schedule/{}?limit=1000".format(
+                "https://api-tvthek.orf.at/api/v4.3/schedule/{}?limit=1000".format(
                     day.strftime("%Y-%m-%d")
                 ),
                 meta={"dont_cache": True},
