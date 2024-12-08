@@ -37,7 +37,7 @@ class TvthekOrfAtSpider(FeedsSpider):
     def parse(self, response):
         json_response = json.loads(response.text)
 
-        for item in json_response["_embedded"]["items"]:
+        for item in json_response:
             # Skip incomplete items or items with active youth protection.
             # We want to have working download links in the feed item.
             if not item["segments_complete"] or item["has_active_youth_protection"]:
@@ -59,32 +59,46 @@ class TvthekOrfAtSpider(FeedsSpider):
         item = json.loads(response.text)
         il = FeedEntryItemLoader()
         il.add_value("title", item["title"])
-        il.add_value(
-            "content_html",
-            '<img src="{}">'.format(item["playlist"]["preview_image_url"]),
-        )
+        # TODO find a preview image URL
+        # il.add_value(
+        #     "content_html",
+        #     '<img src="{}">'.format(item["playlist"]["preview_image_url"]),
+        # )
         if item["description"]:
             il.add_value("content_html", item["description"].replace("\r\n", "<br>"))
         il.add_value("updated", item["date"])
         il.add_value("link", item["share_body"])
+
         # Check how many segments are part of this episode.
         if len(item["_embedded"]["segments"]) == 1:
-            # If only one segment, item["sources"] contains invalid links.
-            # We use the first embedded segment instead.
-            # This is also how mediathekviewweb.de works.
-            item["sources"] = item["_embedded"]["segments"][0]["sources"]
+            # If only one segment, use the progressive HTTP source in segments[0]
+            item["sources"] = item["_embedded"]["segments"][0]["_embedded"]["playlist"][
+                "sources"
+            ]
+        else:
+            # TODO find sources with a progressive HTTP URL for multi-segment episodes
+            self.logger.warning(
+                "Could not extract video for '{}'! "
+                "Unsupported multi-segment episode...".format(item["title"])
+            )
+            raise DropResponse(
+                f"Skipping {response.url} because it's a multi-segment episode...",
+                transient=True,
+            )
 
         if (
-            len(item["sources"]["dash"]) > 0
-            and item["sources"]["dash"][0]["quality_description"] == "Kein DRM"
+            False
+            # TODO check if this is still necessary
+            # len(item["sources"]["dash"]) > 0
+            # and item["sources"]["dash"][0]["quality_description"] == "Kein DRM"
         ):
             self.logger.debug(f'Video for {item["title"]} is DRM protected')
         else:
             try:
                 video = next(
                     s
-                    for s in item["sources"]["progressive_download"]
-                    if s["quality_key"] == "Q8C"
+                    for s in item["sources"]
+                    if s["quality"] == "Q8C" and s["delivery"] == "progressive"
                 )
                 il.add_value("enclosure", {"iri": video["src"], "type": "video/mp4"})
             except StopIteration:
@@ -98,10 +112,12 @@ class TvthekOrfAtSpider(FeedsSpider):
 
         subtitle = item["_embedded"].get("subtitle")
         if subtitle:
-            subtitle = subtitle["_embedded"]["srt_file"]["public_urls"]["reference"]
-            il.add_value("enclosure", {"iri": subtitle["url"], "type": "text/plain"})
+            subtitle = subtitle["srt_url"]
+            il.add_value("enclosure", {"iri": subtitle, "type": "text/plain"})
         else:
-            self.logger.debug("No subtitle file found for '{}'".format(item["url"]))
+            self.logger.debug(
+                "No subtitle file found for '{}'".format(item["_links"]["self"]["href"])
+            )
         il.add_value(
             "category",
             self._categories_from_oewa_base_path(
@@ -134,4 +150,4 @@ class TvthekOrfAtSpider(FeedsSpider):
         }
         for old, new in old_new.items():
             oewa_base_path = oewa_base_path.replace(old, new)
-        return filter(lambda x: x != "", oewa_base_path.split("/"))
+        return list(filter(lambda x: x != "", oewa_base_path.split("/")))
