@@ -69,13 +69,13 @@ class TvthekOrfAtSpider(FeedsSpider):
                     "href"
                 ],
                 self._parse_progressive_download,
-                meta={"cache_expires": timedelta(days=7), "episode": episode},
+                meta={"dont_cache": True, "episode": episode},
             )
         elif "progressive_download" in episode["_links"]:
             yield Request(
                 episode["_links"]["progressive_download"]["href"],
                 self._parse_progressive_download,
-                meta={"cache_expires": timedelta(days=7), "episode": episode},
+                meta={"dont_cache": True, "episode": episode},
             )
         else:
             self.logger.warning(
