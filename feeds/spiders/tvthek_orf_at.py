@@ -25,7 +25,6 @@ class TvthekOrfAtSpider(FeedsSpider):
         # It's not enough to parse only today because we might miss shows that
         # aired just before midnight but were streamed after midnight
         # (see also https://github.com/nblock/feeds/issues/27)
-        # TODO use API version 4.2 here, as they have "self progressive links" which we can use for multi-segment episodes!
         today = datetime.now(gettz("Europe/Vienna"))
         for day in [today, today - timedelta(days=1)]:
             yield Request(
@@ -62,7 +61,9 @@ class TvthekOrfAtSpider(FeedsSpider):
         il.add_value("title", item["title"])
         il.add_value(
             "content_html",
-            '<img src="{}">'.format(item["_embedded"]["image"]["public_urls"]["highlight_teaser"]["url"]),
+            '<img src="{}">'.format(
+                item["_embedded"]["image"]["public_urls"]["highlight_teaser"]["url"]
+            ),
         )
         if item["description"]:
             il.add_value("content_html", item["description"].replace("\r\n", "<br>"))
@@ -85,10 +86,15 @@ class TvthekOrfAtSpider(FeedsSpider):
         )
 
         # Check how many segments are part of this episode.
-        if len(item["_embedded"]["segments"]) == 1 and "progressive_download" in item["_embedded"]["segments"][0]["_links"]:
+        if (
+            len(item["_embedded"]["segments"]) == 1
+            and "progressive_download" in item["_embedded"]["segments"][0]["_links"]
+        ):
             # If only one segment, use the progressive HTTP source in segments[0]
             yield Request(
-                item["_embedded"]["segments"][0]["_links"]["progressive_download"]["href"],
+                item["_embedded"]["segments"][0]["_links"]["progressive_download"][
+                    "href"
+                ],
                 self._parse_progressive_download,
                 # Responses are > 100 KB and useless after 7 days.
                 # So don't keep them longer than necessary.
@@ -117,9 +123,7 @@ class TvthekOrfAtSpider(FeedsSpider):
         il = response.meta["il"]
         try:
             video = next(
-                s
-                for s in item["progressive_download"]
-                if s["quality_key"] == "Q8C"
+                s for s in item["progressive_download"] if s["quality_key"] == "Q8C"
             )
             il.add_value("enclosure", {"iri": video["src"], "type": "video/mp4"})
         except StopIteration:
