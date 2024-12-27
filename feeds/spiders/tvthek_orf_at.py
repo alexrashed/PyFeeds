@@ -56,62 +56,31 @@ class TvthekOrfAtSpider(FeedsSpider):
             )
 
     def _parse_episode(self, response):
-        item = json.loads(response.text)
-        il = FeedEntryItemLoader()
-        il.add_value("title", item["title"])
-        il.add_value(
-            "content_html",
-            '<img src="{}">'.format(
-                item["_embedded"]["image"]["public_urls"]["highlight_teaser"]["url"]
-            ),
-        )
-        if item["description"]:
-            il.add_value("content_html", item["description"].replace("\r\n", "<br>"))
-        il.add_value("updated", item["date"])
-        il.add_value("link", item["share_body"])
-
-        subtitle = item["_embedded"].get("subtitle")
-        if subtitle:
-            subtitle = subtitle["srt_url"]
-            il.add_value("enclosure", {"iri": subtitle, "type": "text/plain"})
-        else:
-            self.logger.debug(
-                "No subtitle file found for '{}'".format(item["_links"]["self"]["href"])
-            )
-        il.add_value(
-            "category",
-            self._categories_from_oewa_base_path(
-                item["_embedded"]["profile"]["oewa_base_path"]
-            ),
-        )
+        episode = json.loads(response.text)
 
         # Check how many segments are part of this episode.
         if (
-            len(item["_embedded"]["segments"]) == 1
-            and "progressive_download" in item["_embedded"]["segments"][0]["_links"]
+            len(episode["_embedded"]["segments"]) == 1
+            and "progressive_download" in episode["_embedded"]["segments"][0]["_links"]
         ):
             # If only one segment, use the progressive HTTP source in segments[0]
             yield Request(
-                item["_embedded"]["segments"][0]["_links"]["progressive_download"][
+                episode["_embedded"]["segments"][0]["_links"]["progressive_download"][
                     "href"
                 ],
                 self._parse_progressive_download,
-                # Responses are > 100 KB and useless after 7 days.
-                # So don't keep them longer than necessary.
-                meta={"cache_expires": timedelta(days=7), "il": il},
+                meta={"cache_expires": timedelta(days=7), "episode": episode},
             )
-        elif "progressive_download" in item["_links"]:
+        elif "progressive_download" in episode["_links"]:
             yield Request(
-                item["_links"]["progressive_download"]["href"],
+                episode["_links"]["progressive_download"]["href"],
                 self._parse_progressive_download,
-                # Responses are > 100 KB and useless after 7 days.
-                # So don't keep them longer than necessary.
-                meta={"cache_expires": timedelta(days=7), "il": il},
+                meta={"cache_expires": timedelta(days=7), "episode": episode},
             )
         else:
             self.logger.warning(
                 "Could not extract video for '{}'! "
-                "Unsupported multi-segment episode...".format(item["title"])
+                "Unsupported multi-segment episode...".format(episode["title"])
             )
             raise DropResponse(
                 f"Skipping {response.url} because it's a multi-segment episode...",
@@ -119,21 +88,55 @@ class TvthekOrfAtSpider(FeedsSpider):
             )
 
     def _parse_progressive_download(self, response):
-        item = json.loads(response.text)
-        il = response.meta["il"]
+        progressive_download = json.loads(response.text)
+        episode = response.meta["episode"]
+
+        il = FeedEntryItemLoader()
+        il.add_value("title", episode["title"])
+        il.add_value(
+            "content_html",
+            '<img src="{}">'.format(
+                episode["_embedded"]["image"]["public_urls"]["highlight_teaser"]["url"]
+            ),
+        )
+        if episode["description"]:
+            il.add_value("content_html", episode["description"].replace("\r\n", "<br>"))
+        il.add_value("updated", episode["date"])
+        il.add_value("link", episode["share_body"])
+
         try:
             video = next(
-                s for s in item["progressive_download"] if s["quality_key"] == "Q8C"
+                s
+                for s in progressive_download["progressive_download"]
+                if s["quality_key"] == "Q8C"
             )
             il.add_value("enclosure", {"iri": video["src"], "type": "video/mp4"})
         except StopIteration:
             self.logger.warning(
-                "Could not extract video for '{}'!".format(item["title"])
+                "Could not extract video for '{}'!".format(episode["title"])
             )
             raise DropResponse(
                 f"Skipping {response.url} because not downloadable yet",
                 transient=True,
             )
+
+        subtitle = episode["_embedded"].get("subtitle")
+        if subtitle:
+            subtitle = subtitle["srt_url"]
+            il.add_value("enclosure", {"iri": subtitle, "type": "text/plain"})
+        else:
+            self.logger.debug(
+                "No subtitle file found for '{}'".format(
+                    episode["_links"]["self"]["href"]
+                )
+            )
+        il.add_value(
+            "category",
+            self._categories_from_oewa_base_path(
+                episode["_embedded"]["profile"]["oewa_base_path"]
+            ),
+        )
+
         return il.load_item()
 
     def _categories_from_oewa_base_path(self, oewa_base_path):
