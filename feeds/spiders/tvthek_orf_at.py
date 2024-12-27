@@ -25,10 +25,11 @@ class TvthekOrfAtSpider(FeedsSpider):
         # It's not enough to parse only today because we might miss shows that
         # aired just before midnight but were streamed after midnight
         # (see also https://github.com/nblock/feeds/issues/27)
+        # TODO use API version 4.2 here, as they have "self progressive links" which we can use for multi-segment episodes!
         today = datetime.now(gettz("Europe/Vienna"))
         for day in [today, today - timedelta(days=1)]:
             yield Request(
-                "https://api-tvthek.orf.at/api/v4.3/schedule/{}".format(
+                "https://api-tvthek.orf.at/api/v4.2/schedule/{}".format(
                     day.strftime("%Y-%m-%d")
                 ),
                 meta={"dont_cache": True},
@@ -59,56 +60,14 @@ class TvthekOrfAtSpider(FeedsSpider):
         item = json.loads(response.text)
         il = FeedEntryItemLoader()
         il.add_value("title", item["title"])
-        # TODO find a preview image URL
-        # il.add_value(
-        #     "content_html",
-        #     '<img src="{}">'.format(item["playlist"]["preview_image_url"]),
-        # )
+        il.add_value(
+            "content_html",
+            '<img src="{}">'.format(item["_embedded"]["image"]["public_urls"]["highlight_teaser"]["url"]),
+        )
         if item["description"]:
             il.add_value("content_html", item["description"].replace("\r\n", "<br>"))
         il.add_value("updated", item["date"])
         il.add_value("link", item["share_body"])
-
-        # Check how many segments are part of this episode.
-        if len(item["_embedded"]["segments"]) == 1:
-            # If only one segment, use the progressive HTTP source in segments[0]
-            item["sources"] = item["_embedded"]["segments"][0]["_embedded"]["playlist"][
-                "sources"
-            ]
-        else:
-            # TODO find sources with a progressive HTTP URL for multi-segment episodes
-            self.logger.warning(
-                "Could not extract video for '{}'! "
-                "Unsupported multi-segment episode...".format(item["title"])
-            )
-            raise DropResponse(
-                f"Skipping {response.url} because it's a multi-segment episode...",
-                transient=True,
-            )
-
-        if (
-            False
-            # TODO check if this is still necessary
-            # len(item["sources"]["dash"]) > 0
-            # and item["sources"]["dash"][0]["quality_description"] == "Kein DRM"
-        ):
-            self.logger.debug(f'Video for {item["title"]} is DRM protected')
-        else:
-            try:
-                video = next(
-                    s
-                    for s in item["sources"]
-                    if s["quality"] == "Q8C" and s["delivery"] == "progressive"
-                )
-                il.add_value("enclosure", {"iri": video["src"], "type": "video/mp4"})
-            except StopIteration:
-                self.logger.warning(
-                    "Could not extract video for '{}'!".format(item["title"])
-                )
-                raise DropResponse(
-                    f"Skipping {response.url} because not downloadable yet",
-                    transient=True,
-                )
 
         subtitle = item["_embedded"].get("subtitle")
         if subtitle:
@@ -124,6 +83,61 @@ class TvthekOrfAtSpider(FeedsSpider):
                 item["_embedded"]["profile"]["oewa_base_path"]
             ),
         )
+
+        # Check how many segments are part of this episode.
+        if len(item["_embedded"]["segments"]) == 1 and "progressive_download" in item["_embedded"]["segments"][0]["_links"]:
+            # If only one segment, use the progressive HTTP source in segments[0]
+            yield Request(
+                item["_embedded"]["segments"][0]["_links"]["progressive_download"]["href"],
+                self._parse_progressive_download,
+                # Responses are > 100 KB and useless after 7 days.
+                # So don't keep them longer than necessary.
+                meta={"cache_expires": timedelta(days=7), "il": il},
+            )
+        elif "progressive_download" in item["_links"]:
+            yield Request(
+                item["_links"]["progressive_download"]["href"],
+                self._parse_progressive_download,
+                # Responses are > 100 KB and useless after 7 days.
+                # So don't keep them longer than necessary.
+                meta={"cache_expires": timedelta(days=7), "il": il},
+            )
+        else:
+            self.logger.warning(
+                "Could not extract video for '{}'! "
+                "Unsupported multi-segment episode...".format(item["title"])
+            )
+            raise DropResponse(
+                f"Skipping {response.url} because it's a multi-segment episode...",
+                transient=True,
+            )
+
+    def _parse_progressive_download(self, response):
+        item = json.loads(response.text)
+        il = response.meta["il"]
+        if (
+            False
+            # TODO check if this is still necessary
+            # len(item["sources"]["dash"]) > 0
+            # and item["sources"]["dash"][0]["quality_description"] == "Kein DRM"
+        ):
+            self.logger.debug(f'Video for {item["title"]} is DRM protected')
+        else:
+            try:
+                video = next(
+                    s
+                    for s in item["progressive_download"]
+                    if s["quality_key"] == "Q8C"
+                )
+                il.add_value("enclosure", {"iri": video["src"], "type": "video/mp4"})
+            except StopIteration:
+                self.logger.warning(
+                    "Could not extract video for '{}'!".format(item["title"])
+                )
+                raise DropResponse(
+                    f"Skipping {response.url} because not downloadable yet",
+                    transient=True,
+                )
         return il.load_item()
 
     def _categories_from_oewa_base_path(self, oewa_base_path):
