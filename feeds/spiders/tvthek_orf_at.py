@@ -115,29 +115,21 @@ class TvthekOrfAtSpider(FeedsSpider):
     def _parse_progressive_download(self, response):
         item = json.loads(response.text)
         il = response.meta["il"]
-        if (
-            False
-            # TODO check if this is still necessary
-            # len(item["sources"]["dash"]) > 0
-            # and item["sources"]["dash"][0]["quality_description"] == "Kein DRM"
-        ):
-            self.logger.debug(f'Video for {item["title"]} is DRM protected')
-        else:
-            try:
-                video = next(
-                    s
-                    for s in item["progressive_download"]
-                    if s["quality_key"] == "Q8C"
-                )
-                il.add_value("enclosure", {"iri": video["src"], "type": "video/mp4"})
-            except StopIteration:
-                self.logger.warning(
-                    "Could not extract video for '{}'!".format(item["title"])
-                )
-                raise DropResponse(
-                    f"Skipping {response.url} because not downloadable yet",
-                    transient=True,
-                )
+        try:
+            video = next(
+                s
+                for s in item["progressive_download"]
+                if s["quality_key"] == "Q8C"
+            )
+            il.add_value("enclosure", {"iri": video["src"], "type": "video/mp4"})
+        except StopIteration:
+            self.logger.warning(
+                "Could not extract video for '{}'!".format(item["title"])
+            )
+            raise DropResponse(
+                f"Skipping {response.url} because not downloadable yet",
+                transient=True,
+            )
         return il.load_item()
 
     def _categories_from_oewa_base_path(self, oewa_base_path):
